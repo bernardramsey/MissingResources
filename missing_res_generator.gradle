@@ -1,0 +1,161 @@
+import com.android.build.gradle.BaseExtension
+import com.android.build.gradle.api.AndroidSourceDirectorySet
+import com.android.build.gradle.api.AndroidSourceSet
+import org.jetbrains.annotations.Nullable
+import org.jetbrains.annotations.NotNull
+
+buildscript {
+    ext.kotlin_version = '1.3.21'
+    repositories {
+        google()
+        jcenter()
+
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:3.4.0'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+subprojects {
+    if (!project.hasProperty("notGenStrings")) {
+        afterEvaluate {
+            def genTask = task("generateMissingRes") {
+                new Generator(project).run()
+            }
+            def cleanTask = task("cleanGeneratedMissingRes", type: Delete) {
+                delete Generator.getGeneratedMissingResDir(project)
+            }
+            project.getTasks().preBuild.dependsOn genTask
+            project.getTasks().clean.dependsOn cleanTask
+        }
+    }
+}
+
+class Generator implements Runnable {
+    static final FileFilter DIRS_FILE_FILTER = new FileFilter() {
+        @Override
+        boolean accept(File file) {
+            return file.isDirectory()
+        }
+    }
+    static final FileFilter XML_FILES_FILE_FILTER = new FileFilter() {
+        @Override
+        boolean accept(File file) {
+            return file.name.endsWith(".xml") && !DIRS_FILE_FILTER.accept(file)
+        }
+    }
+    static final FileFilter NON_DEF_DIRS_FILE_FILTER = new FileFilter() {
+        @Override
+        boolean accept(File file) {
+            return DIRS_FILE_FILTER.accept(file) && file.name.startsWith("values-")
+        }
+    }
+
+    private final Project project
+    private final Map<String, Node> defValues = new HashMap<>()
+    private final Map<String, Node> nonDefValues = new HashMap<>()
+
+    Generator(Project project) {
+        this.project = project
+    }
+
+    private static void parseXmlFile(@Nullable File file, @NotNull Map<String, Node> values) {
+        if (file == null || !XML_FILES_FILE_FILTER.accept(file)) {
+            return
+        }
+
+        def xmlParser = new XmlParser()
+        def root = xmlParser.parse(file)
+        root.children()
+                .forEach {
+            values.put(it.@name, it)
+        }
+    }
+
+    private static void writeValuesToFile(@NotNull Map<String, Node> values, @NotNull File file) {
+        Node root = new Node(null, "resources")
+        values.entrySet().forEach {
+            root.append(it.value.clone())
+        }
+
+        def printer = new XmlNodePrinter(new PrintWriter(file))
+        printer.setPreserveWhitespace(true)
+        printer.print(root)
+    }
+
+    @NotNull
+    static File getGeneratedMissingResDir(@NotNull Project project) {
+        return new File(project.projectDir, "generatedMissingRes/")
+    }
+
+    @Override
+    void run() {
+        AndroidSourceDirectorySet srcDirSet = getSrcDirSet()
+        if (!srcDirSet) {
+            return
+        }
+
+        srcDirSet.srcDirs.forEach {
+            processResDir(it)
+        }
+
+        Map<String, Node> missingVales = new HashMap<>(nonDefValues)
+        missingVales.keySet().removeAll(defValues.keySet())
+
+        if (missingVales.isEmpty()) {
+            return
+        }
+
+        File missingResDir = getGeneratedMissingResDir(project)
+
+        File missingValuesDir = new File(missingResDir, "values/")
+        missingValuesDir.mkdirs()
+
+        File missingValuesFile = new File(missingValuesDir, "values.xml")
+        writeValuesToFile(missingVales, missingValuesFile)
+
+        srcDirSet.srcDirs += project.files(missingResDir)
+    }
+
+    @Nullable
+    private AndroidSourceDirectorySet getSrcDirSet() {
+        BaseExtension androidExtension = project.getExtensions().findByName("android")
+        if (!androidExtension) {
+            return null
+        }
+
+        AndroidSourceSet mainSourceSet = androidExtension.sourceSets.findByName("main")
+        if (!mainSourceSet) {
+            return null
+        }
+
+        return mainSourceSet.res
+    }
+
+    private void processResDir(File resDir) {
+        if (!resDir.exists() || !resDir.isDirectory()) {
+            return
+        }
+
+        File[] nonDefValuesDirs = resDir.listFiles(NON_DEF_DIRS_FILE_FILTER)
+        if (nonDefValuesDirs.length == 0) {
+            return
+        }
+
+        nonDefValuesDirs.each {
+            it.listFiles(XML_FILES_FILE_FILTER).each {
+                parseXmlFile(it, nonDefValues)
+            }
+        }
+
+        File defValuesDir = new File(resDir, "values/")
+        if (!defValuesDir.exists()) {
+            return
+        }
+
+        defValuesDir.listFiles(XML_FILES_FILE_FILTER).each {
+            parseXmlFile(it, defValues)
+        }
+    }
+}
