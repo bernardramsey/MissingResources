@@ -1,0 +1,9 @@
+ext.versions = [
+        androidGradlePlugin: '3.4.1',
+        kotlin: '1.3.30'
+]
+
+ext.gradlePlugins = [
+        android: "com.android.tools.build:gradle:$versions.androidGradlePlugin",
+        kotlinGradle: "org.jetbrains.kotlin:kotlin-gradle-plugin:$versions.kotlin"
+]

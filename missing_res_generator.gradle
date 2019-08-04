@@ -1,19 +1,19 @@
 import com.android.build.gradle.BaseExtension
-import com.android.build.gradle.api.AndroidSourceDirectorySet
 import com.android.build.gradle.api.AndroidSourceSet
-import org.jetbrains.annotations.Nullable
 import org.jetbrains.annotations.NotNull
+import org.jetbrains.annotations.Nullable
 
 buildscript {
-    ext.kotlin_version = '1.3.21'
+    apply from: 'dependencies.gradle'
+
     repositories {
         google()
         jcenter()
 
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:3.4.0'
-        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+        classpath gradlePlugins.android
+        classpath gradlePlugins.kotlinGradle
     }
 }
 
@@ -112,7 +112,9 @@ class ConcreteSourceSetGenerator {
         def root = xmlParser.parse(file)
         root.children()
                 .forEach {
-            values.put(it.@name, it)
+            if (it.@name != null) {
+                values.put(it.@name, it)
+            }
         }
     }
 
