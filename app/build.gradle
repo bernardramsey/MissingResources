@@ -23,6 +23,16 @@ android {
             res.srcDirs += ['otherRes']
         }
     }
+
+    flavorDimensions "version"
+    productFlavors {
+        demo {
+            dimension "version"
+        }
+        full {
+            dimension "version"
+        }
+    }
 }
 
 dependencies {

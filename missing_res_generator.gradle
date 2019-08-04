@@ -21,10 +21,10 @@ subprojects {
     if (!project.hasProperty("notGenStrings")) {
         afterEvaluate {
             def genTask = task("generateMissingRes") {
-                new Generator(project).run()
+                new MissingResGenerator(project).run()
             }
             def cleanTask = task("cleanGeneratedMissingRes", type: Delete) {
-                delete Generator.getGeneratedMissingResDir(project)
+                delete MissingResGenerator.getGeneratedMissingResDir(project)
             }
             project.getTasks().preBuild.dependsOn genTask
             project.getTasks().clean.dependsOn cleanTask
@@ -32,7 +32,39 @@ subprojects {
     }
 }
 
-class Generator implements Runnable {
+class MissingResGenerator implements Runnable {
+    private final Project project
+
+    MissingResGenerator(Project project) {
+        this.project = project
+    }
+
+    @NotNull
+    static File getGeneratedMissingResDir(@NotNull Project project) {
+        return new File(project.projectDir, "generatedMissingRes/")
+    }
+
+    @Override
+    void run() {
+        BaseExtension androidExtension = project.getExtensions().findByName("android")
+        if (!androidExtension) {
+            return
+        }
+
+        androidExtension.sourceSets.forEach {
+            File generatedDir = new ConcreteSourceSetGenerator(it, getGeneratedMissingResDir(project))
+                    .generateMissingResDir()
+
+            if (generatedDir) {
+                it.res.srcDirs += project.files(generatedDir)
+            }
+        }
+    }
+}
+
+class ConcreteSourceSetGenerator {
+    // ======== constants ========
+
     static final FileFilter DIRS_FILE_FILTER = new FileFilter() {
         @Override
         boolean accept(File file) {
@@ -52,13 +84,24 @@ class Generator implements Runnable {
         }
     }
 
-    private final Project project
+    // ======== fields ========
+
+    @NotNull
+    private AndroidSourceSet sourceSet
+    @NotNull
+    private File missingResRootDir
+
     private final Map<String, Node> defValues = new HashMap<>()
     private final Map<String, Node> nonDefValues = new HashMap<>()
 
-    Generator(Project project) {
-        this.project = project
+    // ======== constructors ========
+
+    ConcreteSourceSetGenerator(@NotNull AndroidSourceSet sourceSet, @NotNull File missingResRootDir) {
+        this.sourceSet = sourceSet
+        this.missingResRootDir = missingResRootDir
     }
+
+    // ======== static methods ========
 
     private static void parseXmlFile(@Nullable File file, @NotNull Map<String, Node> values) {
         if (file == null || !XML_FILES_FILE_FILTER.accept(file)) {
@@ -84,19 +127,11 @@ class Generator implements Runnable {
         printer.print(root)
     }
 
-    @NotNull
-    static File getGeneratedMissingResDir(@NotNull Project project) {
-        return new File(project.projectDir, "generatedMissingRes/")
-    }
+    // ======== methods ========
 
-    @Override
-    void run() {
-        AndroidSourceDirectorySet srcDirSet = getSrcDirSet()
-        if (!srcDirSet) {
-            return
-        }
-
-        srcDirSet.srcDirs.forEach {
+    @Nullable
+    File generateMissingResDir() {
+        sourceSet.res.srcDirs.forEach {
             processResDir(it)
         }
 
@@ -104,10 +139,10 @@ class Generator implements Runnable {
         missingVales.keySet().removeAll(defValues.keySet())
 
         if (missingVales.isEmpty()) {
-            return
+            return null
         }
 
-        File missingResDir = getGeneratedMissingResDir(project)
+        File missingResDir = new File(missingResRootDir, sourceSet.name)
 
         File missingValuesDir = new File(missingResDir, "values/")
         missingValuesDir.mkdirs()
@@ -115,22 +150,7 @@ class Generator implements Runnable {
         File missingValuesFile = new File(missingValuesDir, "values.xml")
         writeValuesToFile(missingVales, missingValuesFile)
 
-        srcDirSet.srcDirs += project.files(missingResDir)
-    }
-
-    @Nullable
-    private AndroidSourceDirectorySet getSrcDirSet() {
-        BaseExtension androidExtension = project.getExtensions().findByName("android")
-        if (!androidExtension) {
-            return null
-        }
-
-        AndroidSourceSet mainSourceSet = androidExtension.sourceSets.findByName("main")
-        if (!mainSourceSet) {
-            return null
-        }
-
-        return mainSourceSet.res
+        return missingResDir
     }
 
     private void processResDir(File resDir) {
