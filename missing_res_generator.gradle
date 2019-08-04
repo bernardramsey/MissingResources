@@ -51,8 +51,11 @@ class MissingResGenerator implements Runnable {
             return
         }
 
+        File missingResDir = getGeneratedMissingResDir(project)
+        missingResDir.deleteDir()
+
         androidExtension.sourceSets.forEach {
-            File generatedDir = new ConcreteSourceSetGenerator(it, getGeneratedMissingResDir(project))
+            File generatedDir = new ConcreteSourceSetGenerator(it, missingResDir)
                     .generateMissingResDir()
 
             if (generatedDir) {
